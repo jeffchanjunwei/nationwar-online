@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>🔥 部落纪元 · 上古争霸(双人对战版)</title>
+<link rel="stylesheet" href="/public/style.css">
+</head>
+<body>
+<div id="game">
+  <canvas id="cv"></canvas>
+
+  <div id="topbar">
+    <div class="res"><span class="ic">🍖</span><span id="r-food">0</span></div>
+    <div class="res"><span class="ic">🪵</span><span id="r-wood">0</span></div>
+    <div class="res"><span class="ic">🪨</span><span id="r-stone">0</span></div>
+    <div class="res"><span class="ic">👥</span><span id="r-pop">0/0</span></div>
+    <div class="age">🔥 <span id="r-age">部落时代</span></div>
+    <div class="res" id="r-diff">🌱 简单</div>
+    <div class="res" id="r-net" style="display:none;min-width:0"></div>
+  </div>
+
+  <div id="help">
+    <div><b>左键</b> 选中/框选;选中后<b>左键点目标</b>即下令(无需右键)</div>
+    <div><b>右键</b> 也可下令 · <b>Esc</b> 取消选中 · <b>空格</b> 暂停(单机)/延迟(联机)</div>
+    <div><b>WASD</b> 移视口 · 选村民→右下造建筑 · 小地图可跳转</div>
+  </div>
+
+  <div id="selinfo"></div>
+  <div id="mini-wrap"><canvas id="mini" width="200" height="150"></canvas></div>
+
+  <div id="cmd">
+    <div id="cmd-title">指挥台</div>
+    <div id="cmd-grid"></div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="paused">⏸ 已暂停</div>
+
+  <!-- 联机大厅 -->
+  <div id="lobby"></div>
+
+  <div id="overlay"></div>
+</div>
+
+<script type="module" src="/src/client/main.js"></script>
+</body>
+</html>

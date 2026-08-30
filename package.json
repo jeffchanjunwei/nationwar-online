@@ -1,0 +1,16 @@
+{
+  "name": "nationwar-online",
+  "version": "1.0.0",
+  "description": "部落纪元·上古争霸 —— 双人网上对战版(服务器权威模拟,无构建工具)",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "soak": "node test/soak.mjs",
+    "band": "node test/band.mjs"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
