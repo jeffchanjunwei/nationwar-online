@@ -1,9 +1,10 @@
 // ============================================================
-// 程序化音效:Web Audio 合成,模仿魔兽人族风味的「咕哝人声」
-//  - 人声:锯齿/方波基频 + 三个并联共振峰带通 + 颤音 + 滑音,
-//    多音节连成一句(Animalese 手法),村民清亮 / 军兵低哑
-//  - 敲击:滤波噪声脉冲;金属:失谐方波 + 高通噪声
-//  - 零外部素材;M 键或右上角按钮静音(localStorage 记忆)
+// 音效:英文语音(Web Speech API,魔兽人族风台词)+ Web Audio 合成音效
+//  - 人声:浏览器内置 TTS 说英文(优先英式音色:"Work, work." /
+//    "Job's done!" / "To arms!"……);无可用语音时回退到共振峰
+//    合成的「咕哝人声」(锯齿/方波 + 三并联带通 + 颤音滑音)
+//  - 敲击/金属/号角:滤波噪声、失谐方波、纯音,全程序化,零外部素材
+//  - M 键或左上角按钮静音(localStorage 记忆)
 // ============================================================
 
 let ctx = null, master = null;
@@ -94,27 +95,70 @@ function tone(t0, dur, f0, f1, vol, type = "triangle") {
   o.start(t0); o.stop(t0 + dur + 0.02);
 }
 
+// ---------- 英文语音(Web Speech API;无可用语音时回退到合成咕哝) ----------
+let voices = [];
+function loadVoices() {
+  try { voices = window.speechSynthesis ? speechSynthesis.getVoices() : []; } catch { voices = []; }
+}
+if ("speechSynthesis" in window) {
+  loadVoices();
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
+function pickVoice() {
+  if (!voices.length) loadVoices();
+  // 魔兽人族是英式腔:优先 en-GB,其次 en-US / 任意英文
+  return voices.find(v => /en[-_]GB/i.test(v.lang))
+      || voices.find(v => /en[-_]US/i.test(v.lang))
+      || voices.find(v => /^en/i.test(v.lang))
+      || null;
+}
+const hasTTS = () => "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
+function say(text, { pitch = 1, rate = 1.05 } = {}, fallback) {
+  if (muted) return;
+  if (hasTTS()) {
+    try {
+      const u = new SpeechSynthesisUtterance(text);
+      const v = pickVoice(); if (v) u.voice = v;
+      u.lang = (v && v.lang) || "en-US";
+      u.pitch = pitch; u.rate = rate; u.volume = 1;
+      speechSynthesis.speak(u);
+      return;
+    } catch { /* 落到回退 */ }
+  }
+  if (fallback) fallback();
+}
+function busySpeaking() {
+  try { return hasTTS() && (speechSynthesis.speaking || speechSynthesis.pending); } catch { return false; }
+}
+const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
 // ---------- 场景音效(魔兽人族味) ----------
 const rnd = (a, b) => a + Math.random() * (b - a);
 
 export const sfx = {
   unlock() { ac(); },
 
-  // 村民应答:"More work?"(清亮,三音节起伏)
+  // 村民应答:"Work, work." / "More work?"
   ackWorker() {
-    if (!throttle("ack", 1300)) return;
-    speak([[1, 0.09], [1.18, 0.07], [0.9, 0.11, 0.97]], rnd(185, 215));
+    if (!throttle("ack", 2500)) return;
+    say(pick(["Work, work.", "More work?", "Right away.", "Yes, yes.", "On it!"]),
+      { pitch: 1.15, rate: 1.1 },
+      () => speak([[1, 0.09], [1.18, 0.07], [0.9, 0.11, 0.97]], rnd(185, 215)));
   },
-  // 军队应答:"Yes, mi'lord?"(低哑,两音节)
+  // 军队应答:"Yes, mi'lord?"(低沉)
   ackMilitary() {
-    if (!throttle("ack", 1300)) return;
-    speak([[0.95, 0.08], [1.22, 0.1, 1.02]], rnd(125, 150), { harsh: true });
+    if (!throttle("ack", 2500)) return;
+    say(pick(["Yes, mi'lord?", "Orders?", "At once.", "For the Alliance!"]),
+      { pitch: 0.8, rate: 1.0 },
+      () => speak([[0.95, 0.08], [1.22, 0.1, 1.02]], rnd(125, 150), { harsh: true }));
   },
-  // 下达攻击令:"To arms!"(吼叫下滑)+ 拔武器金属声
+  // 下达攻击令:"To arms!" + 拔武器金属声
   attack() {
-    if (!throttle("atk", 900)) return;
+    if (!throttle("atk", 1500)) return;
     const c = ac(); if (!c || muted) return;
-    speak([[1.28, 0.07], [1.02, 0.09], [0.78, 0.13, 0.93]], rnd(140, 165), { harsh: true, vol: 0.58 });
+    say(pick(["To arms!", "Attack!", "Charge!", "For glory!"]),
+      { pitch: 0.75, rate: 1.1, },
+      () => speak([[1.28, 0.07], [1.02, 0.09], [0.78, 0.13, 0.93]], rnd(140, 165), { harsh: true, vol: 0.58 }));
     const t = c.currentTime + 0.16;
     noiseBurst(t, 0.09, 3200, 2, 0.2, "highpass");
     tone(t, 0.12, 2300, 1700, 0.1, "square");
@@ -130,54 +174,66 @@ export const sfx = {
       tone(t + i * 0.14, 0.07, 175, 120, 0.22);
     }
   },
-  // 建筑完成:"Job's done!"(愉快上扬)
+  // 建筑完成:"Job's done!"
   buildDone() {
-    if (!throttle("bd", 1500)) return;
-    speak([[0.9, 0.08], [1.12, 0.08], [1.38, 0.14, 1.02]], rnd(200, 235));
+    if (!throttle("bd", 2000)) return;
+    say(pick(["Job's done!", "Construction complete!"]),
+      { pitch: 1.1, rate: 1.05 },
+      () => speak([[0.9, 0.08], [1.12, 0.08], [1.38, 0.14, 1.02]], rnd(200, 235)));
     const c = ctx;
-    const t = c.currentTime + 0.1;
-    tone(t, 0.1, 660, 660, 0.12); tone(t + 0.1, 0.16, 880, 880, 0.12);
+    if (c && !muted) {
+      const t = c.currentTime + 0.1;
+      tone(t, 0.1, 660, 660, 0.12); tone(t + 0.1, 0.16, 880, 880, 0.12);
+    }
   },
-  // 报错(资源不足等):低沉两声"唔"
+  // 报错(资源不足等):"We can't afford that."
   error() {
-    if (!throttle("err", 1200)) return;
-    speak([[0.8, 0.1], [0.72, 0.13, 0.96]], 108, { harsh: true, vol: 0.42 });
+    if (!throttle("err", 1500)) return;
+    say(pick(["We can't afford that.", "Not enough resources.", "We need more supplies."]),
+      { pitch: 0.9, rate: 0.95 },
+      () => speak([[0.8, 0.1], [0.72, 0.13, 0.96]], 108, { harsh: true, vol: 0.42 }));
   },
   // 单位训练完成:"Ready to work!"
   ready() {
-    if (!throttle("rdy", 1500)) return;
-    speak([[1, 0.08], [1.28, 0.1, 1.03]], rnd(190, 220));
+    if (!throttle("rdy", 2000)) return;
+    say(pick(["Ready to work!", "Reporting for duty."]),
+      { pitch: 1.1, rate: 1.05 },
+      () => speak([[1, 0.08], [1.28, 0.1, 1.03]], rnd(190, 220)));
   },
-  // 驯服神兽:"By the Light!"(惊喜高音)
+  // 驯服神兽:"By the Light!"
   capture() {
     const c = ac(); if (!c || muted) return;
-    speak([[1.18, 0.06], [1.5, 0.07], [1.1, 0.12, 0.98]], rnd(225, 255));
+    say(pick(["By the Light!", "A magnificent beast!"]),
+      { pitch: 1.25, rate: 1.05 },
+      () => speak([[1.18, 0.06], [1.5, 0.07], [1.1, 0.12, 0.98]], rnd(225, 255)));
     const t = c.currentTime + 0.1;
     tone(t, 0.22, 900, 1600, 0.1);
   },
   // 召唤神兽:神秘上行滑音 + 火花
   summon() {
     const c = ac(); if (!c || muted) return;
+    say("Your beast awaits!", { pitch: 0.95, rate: 1.0 });
     const t = c.currentTime + 0.02;
     tone(t, 0.4, 220, 640, 0.14, "sine");
     tone(t + 0.08, 0.35, 330, 880, 0.09, "triangle");
     noiseBurst(t + 0.3, 0.15, 4200, 2, 0.12, "highpass");
   },
-  // 随机闲聊(游戏中偶发):几句不同的村民咕哝
+  // 随机闲聊(游戏中偶发,语音空闲才说)
   chatter() {
-    if (!throttle("cht", 8000)) return;
+    if (!throttle("cht", 12000) || busySpeaking()) return;
     const c = ac(); if (!c || muted) return;
-    const lines = [
-      [[1, 0.08], [1.1, 0.06], [0.95, 0.08], [1.05, 0.1]],
-      [[0.9, 0.1], [1.25, 0.12, 1.03]],
-      [[1.05, 0.06], [1.05, 0.06], [0.85, 0.12, 0.95]],
-      [[1, 0.07], [1.3, 0.08], [1.15, 0.09], [0.9, 0.11]],
-    ];
-    speak(lines[Math.floor(Math.random() * lines.length)], rnd(150, 235), Math.random() < 0.3 ? { harsh: true } : {});
+    say(pick([
+        "It's quiet... too quiet.", "Lovely day, isn't it?",
+        "The wolves are restless tonight.", "I need a break.",
+        "Work, work.", "What's that over there?", "My axe is getting dull.",
+      ]),
+      { pitch: rnd(0.85, 1.2), rate: rnd(0.95, 1.1) },
+      () => speak([[1, 0.08], [1.1, 0.06], [0.95, 0.08], [1.05, 0.1]], rnd(150, 235)));
   },
-  // 胜利小号角 / 失败低鸣
+  // 胜利小号角 + "Victory!" / 失败低鸣 + "We are undone..."
   victory() {
     const c = ac(); if (!c || muted) return;
+    say("Victory!", { pitch: 1.0, rate: 1.0 });
     const t = c.currentTime + 0.05;
     [[523, 0], [659, 0.13], [784, 0.26], [1046, 0.42]].forEach(([f, dt]) => {
       tone(t + dt, 0.22, f, f, 0.16);
@@ -186,6 +242,7 @@ export const sfx = {
   },
   defeat() {
     const c = ac(); if (!c || muted) return;
+    say("We are undone...", { pitch: 0.8, rate: 0.9 });
     const t = c.currentTime + 0.05;
     [[392, 0], [330, 0.22], [262, 0.44]].forEach(([f, dt]) => {
       tone(t + dt, 0.3, f, f * 0.985, 0.14, "sine");
@@ -207,6 +264,7 @@ export const sfx = {
     muted = !muted;
     localStorage.setItem("nw_muted", muted ? "1" : "0");
     if (master) master.gain.value = muted ? 0 : 0.42;
+    if (muted && hasTTS()) { try { speechSynthesis.cancel(); } catch {} }
   },
   isMuted() { return muted; },
 };
