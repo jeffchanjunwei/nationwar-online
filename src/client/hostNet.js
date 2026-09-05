@@ -108,6 +108,7 @@ export function createNetHostFlow(cb) {
         if (m.state === "left") toast("👋 " + (m.name || "对手") + " 掉线了(60 秒内可重连)");
         else if (m.state === "reconnected") toast("✅ " + (m.name || "对手") + " 已重新连接");
         else if (m.state === "timedout") toast("☠️ " + (m.name || "对手") + " 掉线超时,不再回来");
+        else if (m.state === "quit") toast("🚪 " + (m.name || "对手") + " 退出了对局(判负)");
         break;
       case "chat":
         appendChat((m.name || "?") + ":" + m.msg);
@@ -269,7 +270,7 @@ export function createNetHostFlow(cb) {
     },
     restart() { conn && conn.send({ t: "restart" }); },
     leave() {
-      conn && conn.send({ t: "leave" });
+      if (conn && conn.isOpen() && room) conn.send({ t: "leave" });
       inRoom = false; playing = false; lobbyState = null; room = null; token = null;
       clearSaved();
       dom.lobby.style.display = "none";
@@ -303,7 +304,8 @@ export function createNetHostFlow(cb) {
     destroy() {
       alive = false;
       stopReconnect();
-      conn && conn.close();
+      // 稍延迟再关,确保已排队的 leave 等消息先发出去
+      if (conn) setTimeout(() => { try { conn.close(); } catch {} }, 150);
     },
     // 联机状态条(主循环调用)
     netStatus() {

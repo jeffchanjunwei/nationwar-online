@@ -121,7 +121,22 @@ try {
   assert(restartSnap.u.length > 0, "重连后收到全量快照恢复对局");
   const peerBack = await backPromise;
   assert(peerBack.who === 1, "服务器广播对手重连");
-  B2.ws.close();
+
+  // 中途主动退出 = 判负:对局立即结束,剩余真人获胜;之后房间可再进人
+  const quitPromise = A.wait(m => m.t === "peer" && m.state === "quit");
+  const endPromise = A.wait(m => m.t === "ended");
+  B2.send({ t: "leave" });
+  const q = await quitPromise;
+  assert(q.who === 1, "主动退出广播 quit");
+  const fin = await endPromise;
+  assert(fin.winner === 0, "退出方判负,剩余真人即刻获胜(winner=" + fin.winner + ")");
+  // 退出后同一条新连接仍可正常建房(修复:连接层解绑 leave)
+  const C = connect();
+  await once(C.ws, "open");
+  C.send({ t: "join_room", room, name: "丙" });
+  const cJoined = await C.wait(m => m.t === "joined");
+  assert(!!cJoined.token, "对局结束后房间可再进人");
+  C.ws.close();
 
   // 带宽报告
   const sec = 6.5;

@@ -4,6 +4,7 @@
 // ============================================================
 import { CFG, WORLD_W, WORLD_H, clamp, dist2, isWorker, isEnemyOrHostile, canAfford, dist } from "/src/shared/cfg.js";
 import { cv, mini, dom, cam, screen, keys, mouse, ui, screenToWorld, toast } from "./state.js";
+import { sfx } from "./sfx.js";
 
 let view = null, host = null;
 
@@ -53,26 +54,31 @@ function issueOrder(wx, wy) {
   const sel = selUnitObjs();
   if (!sel.length) return;
   const ids = sel.map(u => u.id);
+  const hasMil = sel.some(u => !isWorker(u));
   const enemy = pickAt(wx, wy, (e) => isEnemyOrHostile(e, my));
   if (enemy) {
     host.submit({ c: "order", ids, order: { type: "attack", target: enemy.id } });
     view.ping(wx, wy, "#ff5252");
+    sfx.attack();
     return;
   }
   const res = pickAt(wx, wy, (e) => e.kind === "res");
   if (res) {
     host.submit({ c: "order", ids, order: { type: "gather", target: res.id } });
     view.ping(res.x, res.y, "#7bd88f");
+    hasMil ? sfx.ackMilitary() : sfx.ackWorker();
     return;
   }
   const fb = pickAt(wx, wy, (e) => e.kind === "bldg" && e.team === my && e.constructing);
   if (fb) {
     host.submit({ c: "order", ids, order: { type: "build", target: fb.id } });
     view.ping(fb.x, fb.y, "#ffd54f");
+    sfx.ackWorker();
     return;
   }
   host.submit({ c: "order", ids, order: { type: "ground", x: wx, y: wy } });
   view.ping(wx, wy, "#cfe8ff");
+  hasMil ? sfx.ackMilitary() : sfx.ackWorker();
 }
 
 // ---------- 放置建筑 ----------
@@ -89,6 +95,7 @@ function tryPlace(x, y) {
   if (overlapsViewBldg(x, y, r) || x < r || x > WORLD_W - r || y < r || y > WORLD_H - r) { toast("此处无法放置"); return; }
   const sel = selUnitObjs();
   host.submit({ c: "build", btype: id, x, y, ids: sel.filter(isWorker).map(u => u.id) });
+  sfx.buildPlace();
   ui.cmdDirty = true;
   if (!keys["shift"]) { ui.buildMode = null; dom.game.classList.remove("building"); }
 }
@@ -159,8 +166,11 @@ export function wireInput() {
   });
 
   window.addEventListener("keydown", (e) => {
+    // 在输入框里打字(昵称/房间码/聊天)时不触发游戏按键
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
     const k = e.key.toLowerCase();
     keys[k] = true;
+    if (k === "m") { sfx.toggleMute(); if (dom.snd) dom.snd.textContent = sfx.isMuted() ? "🔇" : "🔊"; return; }
     if (e.key === " ") {
       e.preventDefault();
       if (host && host.mode === "local" && ui.gameState === "play") { ui.paused = !ui.paused; dom.paused.style.display = ui.paused ? "block" : "none"; }

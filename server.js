@@ -90,6 +90,13 @@ wss.on("connection", (ws) => {
       return;
     }
 
+    // 主动退出:在连接层解绑,同一条连接之后仍可重新建房/加入
+    if (m.t === "leave") {
+      joined.room.leave(joined.slot);
+      joined = null;
+      return;
+    }
+
     // 席位已被新连接接管时,忽略旧连接的残留消息
     if (joined.slot.ws !== ws) return;
     joined.room.onMessage(joined.slot, m);

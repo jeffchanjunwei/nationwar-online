@@ -8,6 +8,7 @@ import { render, genGrass } from "./render.js";
 import { wireInput, initInput, selUnitObjs, selBldgObj, updateCamera, clampCam } from "./input.js";
 import { initUI, updateHUD, difficultyMarkup, wireDiff } from "./ui.js";
 import { createLocalHost } from "./hostLocal.js";
+import { sfx } from "./sfx.js";
 
 let host = null, view = null;
 let last = performance.now();
@@ -116,7 +117,7 @@ function netStop() { host = null; view = null; showMenu(); }
 // ---------- 胜负/事件 ----------
 function handleUiEvents() {
   for (const e of view.takeUiEvents()) {
-    if (e.e === "toast") { toast(e.msg); ui.cmdDirty = true; }
+    if (e.e === "toast") { toast(e.msg); ui.cmdDirty = true; sfx.forMsg(e.msg); }
     else if (e.e === "defeat" && e.team === host.myTeam) {
       if (host.mode === "local") endGame(false, "你的营火被焚毁,部落消散于荒野。");
       else showEndOverlay(false, "你的营火被焚毁。可继续观战。", true);
@@ -136,6 +137,7 @@ function handleUiEvents() {
 function endGame(win, msg) {
   ui.gameState = win ? "win" : "lose";
   ui.paused = false; dom.paused.style.display = "none";
+  if (win) sfx.victory(); else sfx.defeat();
   showEndOverlay(win, msg, false);
 }
 function showEndOverlay(win, msg, spectate) {
@@ -159,11 +161,10 @@ function showEndOverlay(win, msg, spectate) {
   const again = dom.overlay.querySelector("#again-btn");
   if (again) again.onclick = () => {
     if (ui.mode === "single") startSingle();
-    else if (currentNetHost) { currentNetHost.restart(); dom.overlay.classList.add("hide"); }
+    else if (currentNetHost) currentNetHost.restart();   // 等 start 消息再进局(房间缺人时无响应,可返回菜单)
   };
   dom.overlay.querySelector("#menu-btn").onclick = () => {
-    if (currentNetHost) currentNetHost.leave();
-    host = null; view = null;
+    teardownNet();
     showMenu();
   };
   if (ui.mode === "single") wireDiff(dom.overlay, null);
@@ -191,6 +192,8 @@ function frame(now) {
     if (camPending) centerOnCamp();
     handleUiEvents();
     if (host.mode === "net" && dom["r-net"]) dom["r-net"].textContent = host.netStatus();
+    // 闲聊人声:平均每 ~30 秒随机冒一句(魔兽村民味)
+    if (Math.random() < dt / 30) sfx.chatter();
     render(view, selUnitObjs(), selBldgObj());
     updateHUD();
   } else if (view) {
@@ -203,6 +206,11 @@ function frame(now) {
 // ---------- hostNet 装配(联机) ----------
 let currentNetHost = null;
 const AUTOTEST = new URLSearchParams(location.search).get("autotest");
+// 统一拆除:发 leave → 销毁连接(杀僵尸定时器)→ 清状态
+function teardownNet() {
+  if (currentNetHost) { currentNetHost.leave(); currentNetHost.destroy(); currentNetHost = null; }
+  host = null; view = null;
+}
 function setupNetHost() {
   if (currentNetHost) { currentNetHost.destroy(); currentNetHost = null; }
   import("./hostNet.js").then(({ createNetHostFlow }) => {
@@ -210,7 +218,7 @@ function setupNetHost() {
       dom, ui, toast,
       onStart: netStart,
       onStop: netStop,
-      onBackToMenu: () => { currentNetHost = null; host = null; view = null; showMenu(); },
+      onBackToMenu: () => { teardownNet(); showMenu(); },
     });
     currentNetHost.openLobby();
     // 自动化测试钩子:?autotest=join&room=XXXX 自动加入并准备
@@ -225,6 +233,12 @@ genGrass(WORLD_W, WORLD_H);
 resize();
 wireInput();
 showMenu();
+// 音效:首次交互解锁 AudioContext;右上角按钮/M 键静音(见 input.js)
+window.addEventListener("pointerdown", () => sfx.unlock(), { once: true });
+if (dom.snd) {
+  dom.snd.textContent = sfx.isMuted() ? "🔇" : "🔊";
+  dom.snd.onclick = () => { sfx.toggleMute(); dom.snd.textContent = sfx.isMuted() ? "🔇" : "🔊"; };
+}
 // 自动化测试入口:?autotest=single 直接单机开局;?autotest=join&room=XXXX 自动联机(无头浏览器验证用)
 if (AUTOTEST === "single") {
   ui.difficulty = "normal";

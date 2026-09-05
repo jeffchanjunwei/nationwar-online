@@ -6,7 +6,7 @@ import { WORLD_W, WORLD_H } from "/src/shared/cfg.js";
 // ---------- DOM ----------
 export const dom = {};
 for (const id of ["game", "cv", "mini", "topbar", "r-food", "r-wood", "r-stone", "r-pop", "r-age", "r-diff", "r-net",
-                  "selinfo", "cmd", "cmd-title", "cmd-grid", "toast", "paused", "overlay", "help",
+                  "selinfo", "cmd", "cmd-title", "cmd-grid", "toast", "paused", "overlay", "help", "snd",
                   "menu", "mode-slot", "diff-slot", "start-btn", "lobby", "chat-log", "chat-in", "chat-send"]) {
   dom[id] = document.getElementById(id);
 }

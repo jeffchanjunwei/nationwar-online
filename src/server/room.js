@@ -103,10 +103,18 @@ export class Room {
   leave(slot) {
     const idx = this.slots.indexOf(slot);
     if (idx !== -1) this.slots[idx] = null;
-    this.broadcast({ t: "peer", who: slot.team, state: "left", name: slot.name });
+    slot.timedOut = true;             // 主动退出:旧 token 不可再 rejoin
     if (this.phase === "lobby") {
-      // 大厅阶段离开直接腾位;房主移交给剩余玩家
+      this.broadcast({ t: "peer", who: slot.team, state: "left", name: slot.name });
       this.pushLobby();
+      return;
+    }
+    // 对局中/结算中主动退出
+    this.broadcast({ t: "peer", who: slot.team, state: "quit", name: slot.name });
+    if (this.phase === "playing") {
+      // 中途退出视为认输:对局立即结束,剩余真人获胜(房间回到 ended,可再进人/重开)
+      const other = this.slots.find(s => s);
+      this.finish(other ? other.team : -1);
     }
   }
 
@@ -148,9 +156,6 @@ export class Room {
       }
       case "need_full":
         slot.snapCache = null;
-        return;
-      case "leave":
-        this.leave(slot);
         return;
     }
   }
@@ -213,7 +218,8 @@ export class Room {
     }
   }
 
-  finish() {
+  finish(forcedWinner) {
+    if (this.phase !== "playing") return;
     this.phase = "ended";
     // 收尾事件(可能还有最后一包 fx)随最终消息发
     const ev = this.sim.collectEvents();
@@ -221,7 +227,8 @@ export class Room {
       const fin = encodeFull(this.sim, this.seq, ev);
       for (const s of this.slots) if (s && s.connected) this.send(s, fin);
     }
-    this.broadcast({ t: "ended", winner: this.sim.state.winner });
+    const winner = forcedWinner !== undefined ? forcedWinner : this.sim.state.winner;
+    this.broadcast({ t: "ended", winner });
   }
 
   isEmptyForGc(now) {
