@@ -135,8 +135,73 @@ try {
   await once(C.ws, "open");
   C.send({ t: "join_room", room, name: "丙" });
   const cJoined = await C.wait(m => m.t === "joined");
-  assert(!!cJoined.token, "对局结束后房间可再进人");
+  assert(!!cJoined.token && cJoined.yourTeam === 1, "对局结束后房间可再进人(joined 带席位号)");
   C.ws.close();
+
+  // ---------- 回归:对局中一方退网页再重进,不得把对手"踢"回大厅 ----------
+  {
+    const P = connect(), Q = connect();
+    await Promise.all([once(P.ws, "open"), once(Q.ws, "open")]);
+    P.send({ t: "create_room", name: "甲" });
+    const pc = await P.wait(m => m.t === "room_created");
+    Q.send({ t: "join_room", room: pc.room, name: "乙" });
+    assert((await Q.wait(m => m.t === "joined")).yourTeam === 1, "加入者席位号 yourTeam=1");
+    P.send({ t: "ready", ready: true }); Q.send({ t: "ready", ready: true });
+    await P.wait(m => m.t === "lobby" && m.players[0].ready && m.players[1].ready);
+    P.send({ t: "start" });
+    await Promise.all([P.wait(m => m.t === "start"), Q.wait(m => m.t === "start")]);
+    await P.wait(m => m.t === "snap" && m.full);
+    await sleep(2000);                               // 先跑一会儿,让"当前局面"与初始局面可区分
+
+    // 甲退出网页(连接关闭)→ 重开网页 rejoin
+    P.ws.close();
+    await Q.wait(m => m.t === "peer" && m.state === "left");
+    const P2 = connect();
+    await once(P2.ws, "open");
+    let lobbyLeak = 0;
+    Q.on(m => { if (m.t === "lobby") lobbyLeak++; });     // 对局中对手不应收到 lobby
+    const back2 = Q.wait(m => m.t === "peer" && m.state === "reconnected");   // 先注册再 rejoin,防竞态
+    P2.send({ t: "rejoin", room: pc.room, token: pc.token });
+    const st = await P2.wait(m => m.t === "start");
+    assert(st.yourTeam === 0, "重进者收到 start 恢复位席");
+    const snap2 = await P2.wait(m => m.t === "snap" && m.full);
+    assert(snap2.u.length > 0 && snap2.time > 1, "重进者收到的是当前局面而非初始状态(time=" + snap2.time.toFixed(1) + "s)");
+    await back2;
+    await sleep(700);
+    assert(lobbyLeak === 0, "对局中重连未向对手广播 lobby(对手游戏不被大厅覆盖)");
+    P2.ws.close(); Q.ws.close();
+  }
+
+  // ---------- 回归:对局已结束后重进,应看到终局画面而非空白新局 ----------
+  {
+    const P = connect(), Q = connect();
+    await Promise.all([once(P.ws, "open"), once(Q.ws, "open")]);
+    P.send({ t: "create_room", name: "甲" });
+    const pc = await P.wait(m => m.t === "room_created");
+    Q.send({ t: "join_room", room: pc.room, name: "乙" });
+    const qt = (await Q.wait(m => m.t === "joined")).token;
+    P.send({ t: "ready", ready: true }); Q.send({ t: "ready", ready: true });
+    await P.wait(m => m.t === "lobby" && m.players[0].ready && m.players[1].ready);
+    P.send({ t: "start" });
+    await Q.wait(m => m.t === "snap" && m.full);
+    Q.ws.close();                                    // 乙退网页
+    await P.wait(m => m.t === "peer" && m.state === "left");
+    P.send({ t: "leave" });                          // 甲中途退出 → 乙判负,对局结束(退出者本人无回包,房间转 ended)
+    await sleep(300);
+    const Q2 = connect();                            // 乙重进:ended 阶段 rejoin
+    await once(Q2.ws, "open");
+    // 三条消息会同一批到达,必须先注册全部等待再发 rejoin
+    const start5 = Q2.wait(m => m.t === "start");
+    const snap5 = Q2.wait(m => m.t === "snap" && m.full);
+    const ended5 = Q2.wait(m => m.t === "ended");
+    Q2.send({ t: "rejoin", room: pc.room, token: qt });
+    await start5;
+    const s5 = await snap5;
+    assert(s5.u.length > 0, "ended 阶段重进收到终局快照(非空白)");
+    const e5 = await ended5;
+    assert(e5.winner === 1, "ended 阶段重进收到判负结果(退出方甲判负,winner=1)");
+    P.ws.close(); Q2.ws.close();
+  }
 
   // 带宽报告
   const sec = 6.5;

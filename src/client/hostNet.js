@@ -78,7 +78,9 @@ export function createNetHostFlow(cb) {
         save(); renderLobby();
         break;
       case "joined":
-        room = m.room; token = m.token; isHost = false; inRoom = true;
+        room = m.room; token = m.token; inRoom = true;
+        // 席位由服务器分配:房主位(0)空出时补位者会成为新房主,不能硬编码客方
+        isHost = m.yourTeam === undefined ? false : m.yourTeam === 0;
         save(); renderLobby();
         break;
       case "lobby":
@@ -107,7 +109,7 @@ export function createNetHostFlow(cb) {
       case "peer":
         if (m.state === "left") toast("👋 " + (m.name || "对手") + " 掉线了(60 秒内可重连)");
         else if (m.state === "reconnected") toast("✅ " + (m.name || "对手") + " 已重新连接");
-        else if (m.state === "timedout") toast("☠️ " + (m.name || "对手") + " 掉线超时,不再回来");
+        else if (m.state === "timedout") toast("☠️ " + (m.name || "对手") + " 掉线超时,已判负");
         else if (m.state === "quit") toast("🚪 " + (m.name || "对手") + " 退出了对局(判负)");
         break;
       case "chat":
@@ -118,7 +120,11 @@ export function createNetHostFlow(cb) {
         break;
       case "error":
         toast("❌ " + (m.msg || m.code || "未知错误"));
-        if (m.code === "no_such_room" || m.code === "room_full" || m.code === "in_play") { clearSaved(); renderLobby(); }
+        if (m.code === "no_such_room" || m.code === "room_full" || m.code === "in_play") {
+          clearSaved();
+          if (playing) stopReconnect();      // 对局中重连被永久拒绝(如断线超时判负):停止重试
+          renderLobby();
+        }
         break;
     }
   }
@@ -148,7 +154,7 @@ export function createNetHostFlow(cb) {
     if (saved) setStatus("检测到上局 " + saved.room + " 未结束,点「重连对局」恢复");
   }
   function renderLobby() {
-    if (!alive) return;
+    if (!alive || playing) return;   // 对局进行中绝不弹大厅(防止覆盖正在进行的游戏)
     dom.lobby.style.display = "flex";
     if (!inRoom || !lobbyState) {
       dom.lobby.innerHTML = `

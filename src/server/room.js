@@ -21,6 +21,7 @@ export class Room {
     this.acc = 0; this.lastAt = 0;
     this.tickCount = 0; this.seq = 0;
     this.endedSent = false;
+    this.winner = null;               // ended 阶段 rejoin 时回放终局结果
     this.emptySince = Date.now();
   }
 
@@ -84,9 +85,15 @@ export class Room {
     slot.deadline = 0;
     slot.chatTimes = []; slot.msgTimes = [];
     slot.snapCache = null;             // 重连后强制全量
-    this.pushLobby();
+    // 只在大厅阶段广播 lobby:对局中广播会把对手客户端的大厅 UI 弹出来盖掉游戏
+    if (this.phase === "lobby") this.pushLobby();
     if (this.phase === "playing" || this.phase === "ended") {
       this.send(slot, { t: "start", yourTeam: slot.team, difficulty: this.difficulty });
+      if (this.phase === "ended") {
+        // 对局已结束:补发终局全量快照 + ended,客户端重建终局画面(否则进入空白对局)
+        this.send(slot, encodeFull(this.sim, this.seq, []));
+        this.send(slot, { t: "ended", winner: this.winner });
+      }
       this.broadcast({ t: "peer", who: slot.team, state: "reconnected", name: slot.name }, slot);
     }
     return { slot };
@@ -131,16 +138,16 @@ export class Room {
         this.send(slot, { t: "pong", ts: m.ts });
         return;
       case "ready":
-        if (this.phase === "lobby") { slot.ready = !!m.ready; this.pushLobby(); }
+        if (this.phase === "lobby" || this.phase === "ended") { slot.ready = !!m.ready; this.pushLobby(); }
         return;
       case "set_diff":
         if (this.phase === "lobby" && slot === this.hostSlot()) { this.difficulty = m.diff; this.pushLobby(); }
         return;
       case "start":
-        if (slot === this.hostSlot()) this.startGame();
+        if (slot === this.hostSlot()) this.tryStart(slot);
         return;
       case "restart":
-        if (slot === this.hostSlot() && (this.phase === "playing" || this.phase === "ended")) this.startGame();
+        if (slot === this.hostSlot() && (this.phase === "playing" || this.phase === "ended")) this.tryStart(slot);
         return;
       case "cmd": {
         if (this.phase !== "playing" || !slot.connected) return;
@@ -161,25 +168,42 @@ export class Room {
   }
 
   // ---------- 开局 ----------
+  tryStart(slot) {
+    if (!this.startGame()) {
+      // 不满足开局条件时给房主明确反馈,避免"点了没反应"
+      this.send(slot, { t: "error", code: "not_ready", msg: "对手未就位(空位/离开/掉线),暂不能开局" });
+    }
+  }
   startGame() {
-    if (!this.slots[0] || !this.slots[1]) return;
+    if (!this.slots[0] || !this.slots[1]) return false;
+    // 有席位掉线未归时不开新局:否则会开出一局对手是僵尸的对局
+    if (!this.slots[0].connected || !this.slots[1].connected) return false;
     this.sim = createGame({ humans: [0, 1], aiTeams: [2], difficulty: this.difficulty });
     this.phase = "playing";
     this.endedSent = false;
+    this.winner = null;
     this.acc = 0; this.lastAt = 0; this.tickCount = 0; this.seq = 0;
     for (const s of this.slots) if (s) { s.snapCache = null; s.ready = false; }
     for (const s of this.slots) if (s) this.send(s, { t: "start", yourTeam: s.team, difficulty: this.difficulty });
+    return true;
   }
 
   // ---------- 主循环节拍 ----------
   tick(now) {
-    // 断线超时
+    // 断线超时:席位一律释放(旧 token 作废),否则对局中会留下永远无法回归/替换的僵尸席位
     for (const s of this.slots) {
       if (s && !s.connected && s.deadline && now > s.deadline) {
         s.deadline = 0;
         s.timedOut = true;
         this.broadcast({ t: "peer", who: s.team, state: "timedout", name: s.name });
-        if (this.phase === "lobby") { const idx = this.slots.indexOf(s); this.slots[idx] = null; this.pushLobby(); }
+        const idx = this.slots.indexOf(s);
+        if (idx !== -1) this.slots[idx] = null;
+        if (this.phase === "lobby" || this.phase === "ended") this.pushLobby();
+        else if (this.phase === "playing") {
+          // 掉线超时视同认负:对局立即结束,剩余真人获胜(房间回 ended,席位已释放可再进人)
+          const other = this.slots.find(x => x);
+          this.finish(other ? other.team : -1);
+        }
       }
     }
 
@@ -228,6 +252,7 @@ export class Room {
       for (const s of this.slots) if (s && s.connected) this.send(s, fin);
     }
     const winner = forcedWinner !== undefined ? forcedWinner : this.sim.state.winner;
+    this.winner = winner;
     this.broadcast({ t: "ended", winner });
   }
 

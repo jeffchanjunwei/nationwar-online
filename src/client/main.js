@@ -263,6 +263,7 @@ if (AUTOTEST) {
       res: view ? view.myRes() : null, time: view ? Math.round(view.time * 10) / 10 : -1,
       snaps: window.__nwDebug.snaps || 0, orphan: window.__nwDebug.orphanSnaps || 0,
       conn: host && host.debugConn ? host.debugConn() : "-",
+      lobbyVisible: document.getElementById("lobby").style.display !== "none",   // 对局中必须为 false
       errors: window.__nwErrors || [],
     }) }).catch(() => {});
     if (++n >= 10) clearInterval(rep);

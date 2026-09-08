@@ -79,7 +79,7 @@ wss.on("connection", (ws) => {
         const r = manager.join(m.room, ws, m.name);
         if (r.error) { reply({ t: "error", code: r.error, msg: r.error === "no_such_room" ? "房间不存在" : r.error === "room_full" ? "房间已满" : "对局进行中,无法加入" }); return; }
         joined = r;
-        reply({ t: "joined", room: r.room.code, token: r.slot.token });
+        reply({ t: "joined", room: r.room.code, token: r.slot.token, yourTeam: r.slot.team });
       } else if (m.t === "rejoin") {
         const r = manager.rejoin(m.room, ws, m.token);
         if (r.error) { reply({ t: "error", code: r.error, msg: "对局已失效" }); return; }
